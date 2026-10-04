@@ -1,5 +1,5 @@
 import { createInitialDocument, type WorkspaceDocument } from '../../shared/models'
-import { BrowserStorageService, isWorkspaceDocument, type StorageService } from './storageService'
+import { BrowserStorageService, isWorkspaceDocument, migrateDocument, type StorageService } from './storageService'
 
 export interface WorkspaceRepository {
   load(): Promise<WorkspaceDocument | null>
@@ -14,7 +14,7 @@ export class LocalWorkspaceRepository implements WorkspaceRepository {
       const raw = await this.storage.read()
       if (!raw) return null
       const parsed: unknown = JSON.parse(raw)
-      return isWorkspaceDocument(parsed) ? parsed : null
+      return isWorkspaceDocument(parsed) ? migrateDocument(parsed) : null
     } catch {
       return null
     }

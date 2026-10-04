@@ -1,4 +1,4 @@
-import type { DeskItem, ItemBounds, LayoutAnalysis, WorkspacePlan } from './models'
+import type { DeskItem, DeskZone, ItemBounds, LayoutAnalysis, WorkspacePlan, ZoneIssueKind } from './models'
 
 export function normalizeRotation(rotation: number): number {
   const normalized = rotation % 360
@@ -21,6 +21,17 @@ export function getItemBounds(item: DeskItem): ItemBounds {
   }
 }
 
+export function getZoneBounds(zone: Pick<DeskZone, 'x' | 'y' | 'widthMm' | 'heightMm'>): ItemBounds {
+  return {
+    left: zone.x,
+    top: zone.y,
+    right: zone.x + zone.widthMm,
+    bottom: zone.y + zone.heightMm,
+    width: zone.widthMm,
+    height: zone.heightMm,
+  }
+}
+
 export function rectanglesOverlap(first: ItemBounds, second: ItemBounds): boolean {
   const horizontal = Math.min(first.right, second.right) - Math.max(first.left, second.left)
   const vertical = Math.min(first.bottom, second.bottom) - Math.max(first.top, second.top)
@@ -30,6 +41,8 @@ export function rectanglesOverlap(first: ItemBounds, second: ItemBounds): boolea
 export function analyzeLayout(plan: WorkspacePlan): LayoutAnalysis {
   const overlapIds = new Set<string>()
   const outOfBoundsIds = new Set<string>()
+  const forbiddenItemIds = new Set<string>()
+  const cableItemIds = new Set<string>()
   const bounds = new Map(plan.items.map((item) => [item.id, getItemBounds(item)]))
 
   plan.items.forEach((item) => {
@@ -53,13 +66,31 @@ export function analyzeLayout(plan: WorkspacePlan): LayoutAnalysis {
     }
   }
 
+  const zoneViolations = plan.zones.flatMap((zone) => {
+    if (zone.type === 'device') return []
+    const zoneBounds = getZoneBounds(zone)
+    const itemIds = plan.items
+      .filter((item) => {
+        const itemBounds = bounds.get(item.id)
+        return itemBounds && rectanglesOverlap(itemBounds, zoneBounds)
+      })
+      .map((item) => item.id)
+    if (itemIds.length === 0) return []
+    const kind: ZoneIssueKind = zone.type === 'forbidden' ? 'forbidden' : 'cable'
+    itemIds.forEach((id) => (kind === 'forbidden' ? forbiddenItemIds : cableItemIds).add(id))
+    return [{ zoneId: zone.id, kind, itemIds }]
+  })
+
   const occupiedArea = plan.items.reduce((total, item) => total + item.widthMm * item.heightMm, 0)
   const deskArea = plan.deskWidthMm * plan.deskHeightMm
   const coveragePercent = Math.min(100, Math.round((occupiedArea / deskArea) * 100))
-  const hasIssue = overlapIds.size > 0 || outOfBoundsIds.size > 0
+  const hasIssue = overlapIds.size > 0 || outOfBoundsIds.size > 0 || zoneViolations.length > 0
   return {
     overlapIds: [...overlapIds],
     outOfBoundsIds: [...outOfBoundsIds],
+    forbiddenItemIds: [...forbiddenItemIds],
+    cableItemIds: [...cableItemIds],
+    zoneViolations,
     coveragePercent,
     status: hasIssue ? 'attention' : 'clear',
   }
@@ -73,4 +104,9 @@ export function clampDeskSize(value: number, fallback: number): number {
 export function clampItemDimension(value: number, fallback: number): number {
   if (!Number.isFinite(value)) return fallback
   return Math.min(2000, Math.max(40, Math.round(value)))
+}
+
+export function clampZoneDimension(value: number, fallback: number): number {
+  if (!Number.isFinite(value)) return fallback
+  return Math.min(3000, Math.max(60, Math.round(value)))
 }
