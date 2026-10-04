@@ -1,5 +1,5 @@
 import { normalizeRotation } from '../../shared/layoutRules'
-import type { DeskItem } from '../../shared/models'
+import type { DeskItem, DeskZone } from '../../shared/models'
 
 function updateCanvasItem(items: DeskItem[], id: string, updater: (item: DeskItem) => DeskItem): DeskItem[] {
   return items.map((item) => item.id === id ? updater(item) : item)
@@ -11,4 +11,8 @@ export function moveCanvasItem(items: DeskItem[], id: string, x: number, y: numb
 
 export function rotateCanvasItem(items: DeskItem[], id: string, delta: number): DeskItem[] {
   return updateCanvasItem(items, id, (item) => ({ ...item, rotation: normalizeRotation(item.rotation + delta) }))
+}
+
+export function moveCanvasZone(zones: DeskZone[], id: string, x: number, y: number): DeskZone[] {
+  return zones.map((zone) => zone.id === id ? { ...zone, x, y } : zone)
 }

@@ -14,7 +14,7 @@ export class LocalWorkspaceRepository implements WorkspaceRepository {
       const raw = await this.storage.read()
       if (!raw) return null
       const parsed: unknown = JSON.parse(raw)
-      return isWorkspaceDocument(parsed) ? parsed : null
+      return isWorkspaceDocument(parsed) ? normalizeDocument(parsed) : null
     } catch {
       return null
     }
@@ -22,6 +22,13 @@ export class LocalWorkspaceRepository implements WorkspaceRepository {
 
   async save(document: WorkspaceDocument): Promise<void> {
     await this.storage.write(JSON.stringify(document))
+  }
+}
+
+export function normalizeDocument(document: WorkspaceDocument): WorkspaceDocument {
+  return {
+    ...document,
+    plans: document.plans.map((plan) => ({ ...plan, zones: Array.isArray(plan.zones) ? plan.zones : [] })),
   }
 }
 

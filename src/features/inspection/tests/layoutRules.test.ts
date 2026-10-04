@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createPlan, createItem } from '../../../shared/models'
+import { createPlan, createItem, createZone } from '../../../shared/models'
 import { analyzeLayout, getItemBounds, normalizeRotation } from '../../../shared/layoutRules'
 
 describe('workspace rules', () => {
@@ -30,5 +30,28 @@ describe('workspace rules', () => {
     const analysis = analyzeLayout({ ...plan, items: [first, second] })
     expect(analysis.status).toBe('clear')
     expect(analysis.coveragePercent).toBeGreaterThan(0)
+  })
+
+  it('flags items that enter forbidden zones or cover cable zones', () => {
+    const plan = createPlan('test', false)
+    const onForbidden = { ...createItem('monitor'), x: 100, y: 100, widthMm: 300, heightMm: 200 }
+    const onCable = { ...createItem('keyboard'), x: 900, y: 60, widthMm: 400, heightMm: 150 }
+    const onDeviceZone = { ...createItem('lamp'), x: 100, y: 500 }
+    const forbidden = { ...createZone('forbidden'), x: 150, y: 150, widthMm: 300, heightMm: 200 }
+    const cable = { ...createZone('cable'), x: 850, y: 40, widthMm: 600, heightMm: 120 }
+    const deviceZone = { ...createZone('device'), x: 60, y: 460, widthMm: 400, heightMm: 300 }
+    const analysis = analyzeLayout({ ...plan, items: [onForbidden, onCable, onDeviceZone], zones: [forbidden, cable, deviceZone] })
+    expect(analysis.zoneConflictIds).toEqual(expect.arrayContaining([onForbidden.id, onCable.id]))
+    expect(analysis.zoneConflictIds).not.toContain(onDeviceZone.id)
+    expect(analysis.status).toBe('attention')
+  })
+
+  it('ignores zones that no item touches', () => {
+    const plan = createPlan('test', false)
+    const item = { ...createItem('monitor'), x: 100, y: 400 }
+    const forbidden = { ...createZone('forbidden'), x: 1000, y: 100, widthMm: 300, heightMm: 200 }
+    const analysis = analyzeLayout({ ...plan, items: [item], zones: [forbidden] })
+    expect(analysis.zoneConflictIds).toHaveLength(0)
+    expect(analysis.status).toBe('clear')
   })
 })

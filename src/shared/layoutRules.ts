@@ -1,4 +1,5 @@
-import type { DeskItem, ItemBounds, LayoutAnalysis, WorkspacePlan } from './models'
+import type { DeskItem, DeskZone, ItemBounds, LayoutAnalysis, WorkspacePlan } from './models'
+import { getZoneKindDefinition } from './models'
 
 export function normalizeRotation(rotation: number): number {
   const normalized = rotation % 360
@@ -21,6 +22,17 @@ export function getItemBounds(item: DeskItem): ItemBounds {
   }
 }
 
+export function getZoneBounds(zone: DeskZone): ItemBounds {
+  return {
+    left: zone.x,
+    top: zone.y,
+    right: zone.x + zone.widthMm,
+    bottom: zone.y + zone.heightMm,
+    width: zone.widthMm,
+    height: zone.heightMm,
+  }
+}
+
 export function rectanglesOverlap(first: ItemBounds, second: ItemBounds): boolean {
   const horizontal = Math.min(first.right, second.right) - Math.max(first.left, second.left)
   const vertical = Math.min(first.bottom, second.bottom) - Math.max(first.top, second.top)
@@ -30,13 +42,18 @@ export function rectanglesOverlap(first: ItemBounds, second: ItemBounds): boolea
 export function analyzeLayout(plan: WorkspacePlan): LayoutAnalysis {
   const overlapIds = new Set<string>()
   const outOfBoundsIds = new Set<string>()
+  const zoneConflictIds = new Set<string>()
   const bounds = new Map(plan.items.map((item) => [item.id, getItemBounds(item)]))
+  const blockingZones = plan.zones.filter((zone) => getZoneKindDefinition(zone.kind).blocksItems)
 
   plan.items.forEach((item) => {
     const itemBounds = bounds.get(item.id)
     if (!itemBounds) return
     if (itemBounds.left < 0 || itemBounds.top < 0 || itemBounds.right > plan.deskWidthMm || itemBounds.bottom > plan.deskHeightMm) {
       outOfBoundsIds.add(item.id)
+    }
+    if (blockingZones.some((zone) => rectanglesOverlap(itemBounds, getZoneBounds(zone)))) {
+      zoneConflictIds.add(item.id)
     }
   })
 
@@ -56,10 +73,11 @@ export function analyzeLayout(plan: WorkspacePlan): LayoutAnalysis {
   const occupiedArea = plan.items.reduce((total, item) => total + item.widthMm * item.heightMm, 0)
   const deskArea = plan.deskWidthMm * plan.deskHeightMm
   const coveragePercent = Math.min(100, Math.round((occupiedArea / deskArea) * 100))
-  const hasIssue = overlapIds.size > 0 || outOfBoundsIds.size > 0
+  const hasIssue = overlapIds.size > 0 || outOfBoundsIds.size > 0 || zoneConflictIds.size > 0
   return {
     overlapIds: [...overlapIds],
     outOfBoundsIds: [...outOfBoundsIds],
+    zoneConflictIds: [...zoneConflictIds],
     coveragePercent,
     status: hasIssue ? 'attention' : 'clear',
   }
@@ -73,4 +91,9 @@ export function clampDeskSize(value: number, fallback: number): number {
 export function clampItemDimension(value: number, fallback: number): number {
   if (!Number.isFinite(value)) return fallback
   return Math.min(2000, Math.max(40, Math.round(value)))
+}
+
+export function clampZoneDimension(value: number, fallback: number): number {
+  if (!Number.isFinite(value)) return fallback
+  return Math.min(4000, Math.max(40, Math.round(value)))
 }

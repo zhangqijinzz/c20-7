@@ -1,6 +1,10 @@
 export type DeviceType = 'monitor' | 'keyboard' | 'lamp' | 'speaker' | 'stand'
 
+export type ZoneKind = 'cable' | 'device' | 'forbidden'
+
 export type WorkspaceStatus = 'loading' | 'ready' | 'saving' | 'error'
+
+export type CanvasSelection = { type: 'item'; id: string } | { type: 'zone'; id: string }
 
 export interface DeskItem {
   id: string
@@ -12,12 +16,24 @@ export interface DeskItem {
   rotation: number
 }
 
+export interface DeskZone {
+  id: string
+  kind: ZoneKind
+  name: string
+  color: string
+  widthMm: number
+  heightMm: number
+  x: number
+  y: number
+}
+
 export interface WorkspacePlan {
   id: string
   name: string
   deskWidthMm: number
   deskHeightMm: number
   items: DeskItem[]
+  zones: DeskZone[]
   updatedAt: string
 }
 
@@ -39,6 +55,7 @@ export interface ItemBounds {
 export interface LayoutAnalysis {
   overlapIds: string[]
   outOfBoundsIds: string[]
+  zoneConflictIds: string[]
   coveragePercent: number
   status: 'clear' | 'attention'
 }
@@ -51,6 +68,24 @@ export interface DeviceDefinition {
   heightMm: number
   color: string
   hint: string
+}
+
+export interface ZoneKindDefinition {
+  kind: ZoneKind
+  label: string
+  color: string
+  hint: string
+  blocksItems: boolean
+}
+
+export const ZONE_KIND_DEFINITIONS: ZoneKindDefinition[] = [
+  { kind: 'cable', label: '走线区', color: '#7fb2d9', hint: '线缆通道，需保持畅通', blocksItems: true },
+  { kind: 'device', label: '设备区', color: '#9bcfb7', hint: '推荐摆放设备的范围', blocksItems: false },
+  { kind: 'forbidden', label: '禁放区', color: '#e89a9a', hint: '禁止放置任何设备', blocksItems: true },
+]
+
+export function getZoneKindDefinition(kind: ZoneKind): ZoneKindDefinition {
+  return ZONE_KIND_DEFINITIONS.find((zone) => zone.kind === kind) ?? ZONE_KIND_DEFINITIONS[0]
 }
 
 export const DEVICE_DEFINITIONS: DeviceDefinition[] = [
@@ -88,13 +123,32 @@ export function createItem(type: DeviceType, index = 0): DeskItem {
   }
 }
 
+export function createZone(kind: ZoneKind, index = 0): DeskZone {
+  const definition = getZoneKindDefinition(kind)
+  const columns = 2
+  return {
+    id: createId('zone'),
+    kind,
+    name: `${definition.label} ${index + 1}`,
+    color: definition.color,
+    widthMm: kind === 'cable' ? 900 : 420,
+    heightMm: kind === 'cable' ? 120 : 300,
+    x: 120 + (index % columns) * 360,
+    y: 60 + Math.floor(index / columns) * 220,
+  }
+}
+
 export function createPlan(name = '我的工作台', withDemo = true): WorkspacePlan {
   const items = withDemo ? [createItem('monitor', 0), createItem('keyboard', 1)] : []
+  const zones = withDemo ? [createZone('cable', 0)] : []
   if (withDemo) {
     items[0].x = 530
     items[0].y = 105
     items[1].x = 580
     items[1].y = 470
+    zones[0].x = 350
+    zones[0].y = 10
+    zones[0].heightMm = 80
   }
   return {
     id: createId('plan'),
@@ -102,6 +156,7 @@ export function createPlan(name = '我的工作台', withDemo = true): Workspace
     deskWidthMm: DEFAULT_DESK.widthMm,
     deskHeightMm: DEFAULT_DESK.heightMm,
     items,
+    zones,
     updatedAt: new Date().toISOString(),
   }
 }

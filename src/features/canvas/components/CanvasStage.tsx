@@ -1,20 +1,21 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { Move, RotateCw } from 'lucide-react'
-import type { DeskItem, LayoutAnalysis, WorkspacePlan } from '../../../shared/models'
-import { getDeviceDefinition } from '../../../shared/models'
+import type { CanvasSelection, DeskItem, DeskZone, LayoutAnalysis, WorkspacePlan } from '../../../shared/models'
+import { getDeviceDefinition, getZoneKindDefinition } from '../../../shared/models'
 import { getItemBounds } from '../../../shared/layoutRules'
 
 interface CanvasStageProps {
   plan: WorkspacePlan
-  selectedItemId: string | null
+  selection: CanvasSelection | null
   analysis: LayoutAnalysis
-  onSelect: (id: string | null) => void
-  onMove: (id: string, x: number, y: number) => void
+  onSelect: (selection: CanvasSelection | null) => void
+  onMoveItem: (id: string, x: number, y: number) => void
+  onMoveZone: (id: string, x: number, y: number) => void
 }
 
-interface DragState { id: string; offsetX: number; offsetY: number }
+interface DragState { type: 'item' | 'zone'; id: string; offsetX: number; offsetY: number }
 
-export function CanvasStage({ plan, selectedItemId, analysis, onSelect, onMove }: CanvasStageProps) {
+export function CanvasStage({ plan, selection, analysis, onSelect, onMoveItem, onMoveZone }: CanvasStageProps) {
   const stageRef = useRef<SVGSVGElement>(null)
   const [drag, setDrag] = useState<DragState | null>(null)
   const scaleToMm = useCallback((clientX: number, clientY: number) => {
@@ -28,25 +29,34 @@ export function CanvasStage({ plan, selectedItemId, analysis, onSelect, onMove }
     const handleMove = (event: PointerEvent) => {
       const point = scaleToMm(event.clientX, event.clientY)
       if (!point) return
-      onMove(drag.id, point.x - drag.offsetX, point.y - drag.offsetY)
+      if (drag.type === 'zone') onMoveZone(drag.id, point.x - drag.offsetX, point.y - drag.offsetY)
+      else onMoveItem(drag.id, point.x - drag.offsetX, point.y - drag.offsetY)
     }
     const handleUp = () => setDrag(null)
     window.addEventListener('pointermove', handleMove)
     window.addEventListener('pointerup', handleUp)
     return () => { window.removeEventListener('pointermove', handleMove); window.removeEventListener('pointerup', handleUp) }
-  }, [drag, onMove, scaleToMm])
+  }, [drag, onMoveItem, onMoveZone, scaleToMm])
 
-  const startDrag = (event: ReactPointerEvent<SVGGElement>, item: DeskItem) => {
+  const startItemDrag = (event: ReactPointerEvent<SVGGElement>, item: DeskItem) => {
     event.stopPropagation()
     const point = scaleToMm(event.clientX, event.clientY)
     if (!point) return
-    onSelect(item.id)
-    setDrag({ id: item.id, offsetX: point.x - item.x, offsetY: point.y - item.y })
+    onSelect({ type: 'item', id: item.id })
+    setDrag({ type: 'item', id: item.id, offsetX: point.x - item.x, offsetY: point.y - item.y })
+  }
+
+  const startZoneDrag = (event: ReactPointerEvent<SVGGElement>, zone: DeskZone) => {
+    event.stopPropagation()
+    const point = scaleToMm(event.clientX, event.clientY)
+    if (!point) return
+    onSelect({ type: 'zone', id: zone.id })
+    setDrag({ type: 'zone', id: zone.id, offsetX: point.x - zone.x, offsetY: point.y - zone.y })
   }
 
   return (
     <div className="canvas-wrap">
-      <div className="canvas-toolbar"><span><Move size={14} /> 拖动设备调整位置</span><span><RotateCw size={14} /> 旋转请在右侧操作</span></div>
+      <div className="canvas-toolbar"><span><Move size={14} /> 拖动设备或分区调整位置</span><span><RotateCw size={14} /> 旋转请在右侧操作</span></div>
       <svg ref={stageRef} className="desk-canvas" viewBox={`0 0 ${plan.deskWidthMm} ${plan.deskHeightMm}`} role="img" aria-label={`桌面布局画布，${plan.deskWidthMm}乘${plan.deskHeightMm}毫米`} onPointerDown={() => onSelect(null)}>
         <defs>
           <pattern id="desk-grid" width="50" height="50" patternUnits="userSpaceOnUse"><path d="M 50 0 L 0 0 0 50" fill="none" stroke="#d8e1ed" strokeWidth="1" /></pattern>
@@ -55,13 +65,23 @@ export function CanvasStage({ plan, selectedItemId, analysis, onSelect, onMove }
         <rect width={plan.deskWidthMm} height={plan.deskHeightMm} rx="22" fill="#f8fafc" />
         <rect width={plan.deskWidthMm} height={plan.deskHeightMm} rx="22" fill="url(#desk-grid)" />
         <text x="34" y="48" fill="#a0aec0" fontSize="20" letterSpacing="3">FOCUS ZONE / {plan.deskWidthMm} × {plan.deskHeightMm} MM</text>
+        {plan.zones.map((zone) => {
+          const definition = getZoneKindDefinition(zone.kind)
+          const isSelected = selection?.type === 'zone' && selection.id === zone.id
+          return <g className={`desk-zone zone-${zone.kind} ${isSelected ? 'is-selected' : ''}`} key={zone.id} onPointerDown={(event) => startZoneDrag(event, zone)} role="button" tabIndex={0} aria-label={`${definition.label}${zone.name}，${zone.widthMm}乘${zone.heightMm}毫米`}>
+            <rect x={zone.x} y={zone.y} width={zone.widthMm} height={zone.heightMm} rx="16" fill={zone.color} fillOpacity="0.16" stroke={zone.color} strokeWidth="3" strokeDasharray={zone.kind === 'forbidden' ? '16 10' : undefined} />
+            <text x={zone.x + 18} y={zone.y + 34} fill={zone.color} fontSize="20" fontWeight="700" letterSpacing="1">{zone.name}</text>
+            <text x={zone.x + 18} y={zone.y + 58} fill={zone.color} fontSize="15" opacity="0.85">{definition.label} · {zone.widthMm} × {zone.heightMm}</text>
+            {isSelected && <rect className="zone-selection-box" x={zone.x - 8} y={zone.y - 8} width={zone.widthMm + 16} height={zone.heightMm + 16} rx="14" fill="none" />}
+          </g>
+        })}
         {plan.items.map((item) => {
           const definition = getDeviceDefinition(item.type)
-          const isSelected = selectedItemId === item.id
-          const hasIssue = analysis.overlapIds.includes(item.id) || analysis.outOfBoundsIds.includes(item.id)
+          const isSelected = selection?.type === 'item' && selection.id === item.id
+          const hasIssue = analysis.overlapIds.includes(item.id) || analysis.outOfBoundsIds.includes(item.id) || analysis.zoneConflictIds.includes(item.id)
           const cx = item.x + item.widthMm / 2
           const cy = item.y + item.heightMm / 2
-          return <g className={`desk-item ${isSelected ? 'is-selected' : ''} ${hasIssue ? 'has-issue' : ''}`} key={item.id} onPointerDown={(event) => startDrag(event, item)} role="button" tabIndex={0} aria-label={`${definition.label}，${item.widthMm}乘${item.heightMm}毫米`}>
+          return <g className={`desk-item ${isSelected ? 'is-selected' : ''} ${hasIssue ? 'has-issue' : ''}`} key={item.id} onPointerDown={(event) => startItemDrag(event, item)} role="button" tabIndex={0} aria-label={`${definition.label}，${item.widthMm}乘${item.heightMm}毫米`}>
             <g transform={`translate(${cx} ${cy}) rotate(${item.rotation})`}>
               <rect x={-item.widthMm / 2} y={-item.heightMm / 2} width={item.widthMm} height={item.heightMm} rx={Math.min(24, item.heightMm / 5)} fill={definition.color} filter="url(#item-shadow)" />
               <rect className="item-inner-line" x={-item.widthMm / 2 + 12} y={-item.heightMm / 2 + 12} width={Math.max(0, item.widthMm - 24)} height={Math.max(0, item.heightMm - 24)} rx={12} fill="none" />
@@ -72,9 +92,9 @@ export function CanvasStage({ plan, selectedItemId, analysis, onSelect, onMove }
             {hasIssue && <g transform={`translate(${Math.max(18, getItemBounds(item).right - 4)} ${Math.max(18, getItemBounds(item).top - 4)}`}><circle r="18" fill="#ef6a6a" /><text textAnchor="middle" y="7" fill="white" fontSize="22" fontWeight="700">!</text></g>}
           </g>
         })}
-        {plan.items.length === 0 && <g><circle cx={plan.deskWidthMm / 2} cy={plan.deskHeightMm / 2 - 12} r="32" fill="#e8eef6" /><text x={plan.deskWidthMm / 2} y={plan.deskHeightMm / 2 + 2} textAnchor="middle" fill="#8493a8" fontSize="22">+</text><text x={plan.deskWidthMm / 2} y={plan.deskHeightMm / 2 + 48} textAnchor="middle" fill="#8493a8" fontSize="22">从左侧添加第一件设备</text></g>}
+        {plan.items.length === 0 && plan.zones.length === 0 && <g><circle cx={plan.deskWidthMm / 2} cy={plan.deskHeightMm / 2 - 12} r="32" fill="#e8eef6" /><text x={plan.deskWidthMm / 2} y={plan.deskHeightMm / 2 + 2} textAnchor="middle" fill="#8493a8" fontSize="22">+</text><text x={plan.deskWidthMm / 2} y={plan.deskHeightMm / 2 + 48} textAnchor="middle" fill="#8493a8" fontSize="22">从左侧添加第一件设备或分区</text></g>}
       </svg>
-      <div className="canvas-legend"><span><i className="legend-dot clear-dot" /> 可用空间</span><span><i className="legend-dot issue-dot" /> 冲突 / 越界</span><span className="canvas-scale">网格：50 mm</span></div>
+      <div className="canvas-legend"><span><i className="legend-dot clear-dot" /> 可用空间</span><span><i className="legend-dot zone-dot" /> 功能分区</span><span><i className="legend-dot issue-dot" /> 冲突 / 越界 / 压区</span><span className="canvas-scale">网格：50 mm</span></div>
     </div>
   )
 }
